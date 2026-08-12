@@ -3,7 +3,6 @@
 
 import json
 import os
-import time
 import urllib.parse
 from datetime import datetime
 from typing import Dict, List
@@ -34,7 +33,9 @@ if not os.path.exists('client_secret.json') and os.getenv("CLIENT_SECRET_JSON"):
 # ==========================================
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 BLOGGER_BLOG_ID = os.getenv("BLOGGER_BLOG_ID")
-MODEL_NAME = "nvidia/nemotron-3-ultra-550b-a55b:free"
+
+# Stable free model on OpenRouter
+MODEL_NAME = "google/gemini-2.0-flash-lite-preview-02-05:free"
 
 SCOPES = ['https://www.googleapis.com/auth/blogger']
 
@@ -47,53 +48,13 @@ client = OpenAI(
     }
 )
 
-# ==========================================
-# CATEGORIES SETUP
-# ==========================================
-ONCOLOGY_SUBCATEGORIES = {
-    "General Oncology": ["oncology clinical trial results", "ASCO AACR Phase 3 readout"],
-    "Antibody-Drug Conjugates (ADC)": ["ADC clinical trial readout", "antibody drug conjugate pipeline"],
-    "Bispecific Antibodies": ["bispecific antibody clinical trial", "bispecific T-cell engager pipeline"],
-    "RAS Pathway Inhibitors": ["KRAS inhibitor clinical trial", "pan-RAS inhibitor trial readout"],
-    "Emerging Cancer Vaccines": ["cancer vaccine clinical trial", "mRNA cancer vaccine pipeline"],
-    "CAR-T and Cell Therapy": ["CAR-T cell therapy clinical trial", "allogeneic cell therapy readout"]
-}
-
-NEUROSCIENCE_SUBCATEGORIES = {
-    "General Neuroscience": ["neuroscience CNS clinical trial results", "Phase 3 readout neuroscience biotech"],
-    "Schizophrenia and MDD": ["schizophrenia clinical trial readout", "depression drug pipeline catalyst"],
-    "Alzheimer's and Neurodegenerative": ["Alzheimer clinical trial readout", "CTAD Alzheimer data readout"],
-    "Rare Diseases and Movement Disorders": ["movement disorder trial readout", "orphan drug status neurological disease"]
-}
-
-IMMUNOLOGY_SUBCATEGORIES = {
-    "General Immunology": ["immunology clinical trial results", "autoimmune Phase 3 readout"],
-    "Biologics (mAbs)": ["monoclonal antibody autoimmune trial", "biologic autoimmune IL-23 IL-17"],
-    "Calcineurin Inhibitors": ["calcineurin inhibitor clinical trial", "calcineurin inhibitor pipeline"],
-    "Antimetabolites": ["antimetabolite immunosuppressive trial", "immunosuppressive drug trial results"],
-    "JAK Inhibitors": ["JAK inhibitor clinical trial readout", "TYK2 inhibitor autoimmune trial"]
-}
-
-ANTI_DIABETICS_SUBCATEGORIES = {
-    "General Anti-diabetics": ["diabetes clinical trial results", "Phase 3 readout diabetes drug"],
-    "GLP-1 and Injectables": ["GLP-1 GIP clinical trial obesity", "GLP-1 diabetes trial readout"],
-    "Oral Therapies": ["oral GLP-1 clinical trial readout", "oral diabetes drug pipeline catalyst"]
-}
-
-PRIMARY_CATEGORIES = {
-    "Oncology": ONCOLOGY_SUBCATEGORIES,
-    "Neuroscience": NEUROSCIENCE_SUBCATEGORIES, 
-    "Immunology": IMMUNOLOGY_SUBCATEGORIES,
-    "Anti-diabetics": ANTI_DIABETICS_SUBCATEGORIES,
-    "AI Drug Discovery (AIDD)": [
-        "AI drug discovery clinical trial",
-        "AIDD candidate pipeline progress",
-        "computational biology drug candidate trial"
-    ]
-}
-
-SUBCATEGORY_PARENTS = ["Oncology", "Neuroscience", "Immunology", "Anti-diabetics"]
-
+# Target strictly RAS Pathway Inhibitors
+CATEGORY_LABEL = "Oncology - RAS Pathway Inhibitors"
+RAS_QUERIES = [
+    "KRAS inhibitor clinical trial", 
+    "pan-RAS inhibitor trial readout",
+    "KRAS G12C G12D inhibitor pipeline"
+]
 
 # ==========================================
 # 1. RSS NEWS INGESTION
@@ -118,7 +79,7 @@ def fetch_google_news_rss(query: str, max_results: int = 5) -> List[Dict]:
         })
     return articles
 
-def gather_category_data(category_label: str, queries: List[str]) -> List[Dict]:
+def gather_category_data(queries: List[str]) -> List[Dict]:
     aggregated_articles = []
     seen_titles = set()
     
@@ -157,13 +118,13 @@ def analyze_catalysts_with_llm(category_label: str, news_data: List[Dict]) -> Di
     ]) if news_data else "No RSS news retrieved. Rely on biopharma domain expertise."
 
     user_prompt = f"""
-Category / Subcategory to Analyze: {category_label}
+Category to Analyze: {category_label}
 
 Recent News & Data:
 {formatted_news}
 
 Identify and rank the TOP 5 DRUG CANDIDATES in {category_label}.
-Return valid JSON adhering to this schema:
+Return valid JSON adhering strictly to this structure:
 
 {{
   "category": "{category_label}",
@@ -219,9 +180,7 @@ Return valid JSON adhering to this schema:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt}
         ],
-        temperature=0.0,
-        top_p=1.0,
-        seed=42,
+        temperature=0.1,
         response_format={"type": "json_object"}
     )
     
@@ -230,10 +189,13 @@ Return valid JSON adhering to this schema:
 
 
 # ==========================================
-# 3. HTML BLOG BUILDER
+# 3. HTML BLOG BUILDER (WITH NEWS LINKS)
 # ==========================================
-def build_html_blog_post(analysis: Dict) -> str:
-    category = analysis.get("category", "Biotech").title()
+def build_html_blog_post(analysis: Dict, news_data: List[Dict]) -> str:
+    if not isinstance(analysis, dict):
+        raise ValueError("Invalid LLM response received: output is not a dictionary.")
+
+    category = analysis.get("category", "Oncology - RAS Pathway Inhibitors").title()
     ranked_drugs = analysis.get("ranked_drugs", [])
     
     html = f"<h2>Daily Catalyst Intelligence Report: {category}</h2>"
@@ -245,11 +207,11 @@ def build_html_blog_post(analysis: Dict) -> str:
     html += "<tr style='background-color: #f2f2f2;'><th>Rank</th><th>Candidate</th><th>Ticker</th><th>Phase</th><th>Score</th></tr>"
     for drug in ranked_drugs:
         html += f"<tr>"
-        html += f"<td><b>#{drug.get('rank')}</b></td>"
-        html += f"<td>{drug.get('drug_name')}</td>"
-        html += f"<td>{drug.get('company_ticker')}</td>"
-        html += f"<td>{drug.get('clinical_trials', {}).get('current_phase')}</td>"
-        html += f"<td><b>{drug.get('weighted_priority_score_total')}/10</b></td>"
+        html += f"<td><b>#{drug.get('rank', 'N/A')}</b></td>"
+        html += f"<td>{drug.get('drug_name', 'N/A')}</td>"
+        html += f"<td>{drug.get('company_ticker', 'N/A')}</td>"
+        html += f"<td>{drug.get('clinical_trials', {}).get('current_phase', 'N/A')}</td>"
+        html += f"<td><b>{drug.get('weighted_priority_score_total', 'N/A')}/10</b></td>"
         html += f"</tr>"
     html += "</table><br/>"
     
@@ -258,7 +220,6 @@ def build_html_blog_post(analysis: Dict) -> str:
     for drug in ranked_drugs:
         trials = drug.get("clinical_trials", {})
         stock = drug.get("stock_market_context", {})
-        scores = drug.get("priority_scores", {})
         inv = drug.get("investment_analysis", {})
         
         html += f"<div style='border: 1px solid #ccc; padding: 15px; margin-bottom: 20px; border-radius: 5px;'>"
@@ -285,6 +246,19 @@ def build_html_blog_post(analysis: Dict) -> str:
 
         html += f"<p><b>Investment Thesis:</b> <em>{drug.get('investment_thesis')}</em></p>"
         html += f"</div>"
+        
+    # News Links & Sources Section
+    if news_data:
+        html += "<hr/><h3>Fetched News & Intelligence Sources</h3><ul>"
+        for item in news_data:
+            title = item.get("title", "News Source")
+            link = item.get("link", "#")
+            source = item.get("source", "Google News")
+            published = item.get("published", "")
+            
+            html += f"<li><a href='{link}' target='_blank' rel='noopener noreferrer'><b>{title}</b></a> "
+            html += f"<em>({source} - {published})</em></li>"
+        html += "</ul>"
         
     return html
 
@@ -324,17 +298,17 @@ def publish_to_blogger(service, title: str, content_html: str, labels: List[str]
     try:
         posts = service.posts()
         result = posts.insert(blogId=BLOGGER_BLOG_ID, body=body).execute()
-        print(f"[+] Post published: {result.get('url')}")
+        print(f"[+] Successfully published to Blogger: {result.get('url')}")
     except Exception as e:
         print(f"[!] Error publishing to Blogger: {e}")
 
 
 # ==========================================
-# 5. BATCH AUTOMATION RUNNER
+# 5. SINGLE CATEGORY RUNNER
 # ==========================================
-def run_all_categories():
+def run_single_category():
     print("="*80)
-    print(f" STARTING BATCH BIOTECH ANALYSIS & PUBLISHING: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f" PROCESSING TARGET REPORT: {CATEGORY_LABEL}")
     print("="*80)
 
     try:
@@ -343,30 +317,26 @@ def run_all_categories():
         print(f"[!] Authentication Error: {e}")
         return
 
-    category_queue = []
-
-    for cat_name, content in PRIMARY_CATEGORIES.items():
-        if cat_name in SUBCATEGORY_PARENTS:
-            for sub_name, queries in content.items():
-                category_queue.append((f"{cat_name} - {sub_name}", cat_name, queries))
-        else:
-            category_queue.append((cat_name, cat_name, content))
-
-    for label, parent_cat, queries in category_queue:
-        print(f"\n[>>>] Processing Category: {label}")
-        news_items = gather_category_data(label, queries)
+    # Step 1: Gather RSS news for RAS Oncology
+    print(f"[1/3] Gathering RSS news for queries: {RAS_QUERIES}")
+    news_items = gather_category_data(RAS_QUERIES)
+    
+    # Step 2: Run LLM Analysis
+    print("[2/3] Analyzing top candidates with LLM...")
+    try:
+        report = analyze_catalysts_with_llm(CATEGORY_LABEL, news_items)
         
-        try:
-            report = analyze_catalysts_with_llm(label, news_items)
-            post_html = build_html_blog_post(report)
-            post_title = f"{label} Top 5 Candidates Report ({datetime.now().strftime('%b %d, %Y')})"
-            labels = ["Biotech Intelligence", parent_cat]
-            
-            publish_to_blogger(blogger_service, post_title, post_html, labels)
-        except Exception as e:
-            print(f"[!] Error processing {label}: {e}")
-            
-        time.sleep(5)
+        # Pass news_items into the HTML builder to append news links
+        post_html = build_html_blog_post(report, news_items)
+        post_title = f"{CATEGORY_LABEL} Top 5 Candidates Report ({datetime.now().strftime('%b %d, %Y')})"
+        labels = ["Biotech Intelligence", "Oncology", "RAS Inhibitors"]
+        
+        # Step 3: Publish post
+        print("[3/3] Publishing report to Google Blogger...")
+        publish_to_blogger(blogger_service, post_title, post_html, labels)
+        
+    except Exception as e:
+        print(f"[!] Execution failed for {CATEGORY_LABEL}: {e}")
 
 if __name__ == "__main__":
-    run_all_categories()
+    run_single_category()
