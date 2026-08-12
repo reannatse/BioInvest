@@ -1,0 +1,13 @@
+# Ignore Google API credential files
+credentials.json
+token.json
+
+# Ignore Python environment and cache
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# Ignore environment variable files containing secret keys
+.env
