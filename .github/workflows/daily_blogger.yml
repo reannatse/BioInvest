@@ -1,0 +1,34 @@
+name: Daily Blogger Auto Publisher
+
+on:
+  schedule:
+    # Runs daily at 08:00 AM UTC
+    - cron: '0 8 * * *'
+  # Allows triggering manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check out repo
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run script
+      env:
+        OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
+        CLIENT_SECRET_JSON: ${{ secrets.CLIENT_SECRET_JSON }}
+        TOKEN_JSON: ${{ secrets.TOKEN_JSON }}
+      run: python main.py
