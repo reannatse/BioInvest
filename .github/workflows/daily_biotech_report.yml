@@ -1,0 +1,42 @@
+name: Daily Biotech Report to Blogger
+
+on:
+  schedule:
+    - cron: "0 13 * * *"   # Runs daily at 13:00 UTC
+  workflow_dispatch:        # Allows manual run from GitHub interface
+
+jobs:
+  run-report:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Create Auth JSON Files from Secrets
+        env:
+          CLIENT_SECRET_JSON: ${{ secrets.CLIENT_SECRET_JSON }}
+          TOKEN_JSON: ${{ secrets.TOKEN_JSON }}
+        run: |
+          echo "$CLIENT_SECRET_JSON" > client_secret.json
+          echo "$TOKEN_JSON" > token.json
+
+      - name: Run report publisher
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
+          CATEGORY_NAME: "Oncology"
+          SUBCATEGORY_NAME: "RAS Pathway Targeted Small Molecule Inhibitors"
+          PUBLISH_STATUS: "LIVE"
+        run: |
+          python main.py
