@@ -1,9 +1,9 @@
-name: Daily Biotech Report to Blogger
+name: Daily Biotech Report to WordPress
 
 on:
   schedule:
     - cron: "0 13 * * *"   # Runs daily at 13:00 UTC
-  workflow_dispatch:        # Allows manual run from GitHub interface
+  workflow_dispatch:        # Manual execution trigger
 
 jobs:
   run-report:
@@ -21,22 +21,16 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Create Auth JSON Files from Secrets
-        env:
-          CLIENT_SECRET_JSON: ${{ secrets.CLIENT_SECRET_JSON }}
-          TOKEN_JSON: ${{ secrets.TOKEN_JSON }}
-        run: |
-          echo "$CLIENT_SECRET_JSON" > client_secret.json
-          echo "$TOKEN_JSON" > token.json
+          pip install feedparser openai tqdm requests python-dotenv
 
       - name: Run report publisher
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
+          WP_URL: ${{ secrets.WP_URL }}
+          WP_USERNAME: ${{ secrets.WP_USERNAME }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
           CATEGORY_NAME: "Oncology"
           SUBCATEGORY_NAME: "RAS Pathway Targeted Small Molecule Inhibitors"
-          PUBLISH_STATUS: "LIVE"
+          PUBLISH_STATUS: "publish" # Change to 'draft' if you prefer to manually review posts
         run: |
           python main.py
