@@ -35,6 +35,7 @@ CLIENT_SECRET_FILE = "client_secret.json"
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=OPENROUTER_API_KEY,
+    timeout=120.0,
     default_headers={
         "HTTP-Referer": "https://localhost",
         "X-Title": "Biotech Catalyst Agent",
