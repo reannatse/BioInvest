@@ -20,7 +20,7 @@ load_dotenv()
 # CONFIGURATION & INITIALIZATION
 # ==========================================
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-MODEL_NAME = "google/gemini-2.0-flash-lite-preview-02-05:free"
+MODEL_NAME = "nvidia/nemotron-3-ultra-550b-a55b:free"
 
 WP_URL = os.getenv("WP_URL")  # e.g., "https://yourdomain.com"
 WP_USERNAME = os.getenv("WP_USERNAME")
