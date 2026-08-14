@@ -32,4 +32,4 @@ jobs:
           WP_OAUTH_TOKEN: ${{ secrets.WP_OAUTH_TOKEN }}
           PUBLISH_STATUS: "publish"
         run: |
-          python main.py
+          python general.py
