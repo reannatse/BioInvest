@@ -343,8 +343,28 @@ Analyze the data and return the TOP 5 DRUG CANDIDATES formatted strictly as vali
         response_format={"type": "json_object"}
     )
 
+    # ----------------------------------------------------
+    # FIX: Safely retrieve content to avoid NoneType errors
+    # ----------------------------------------------------
+    if not response.choices or len(response.choices) == 0:
+        raise ValueError("API returned an empty response with no choices.")
+
+    message = response.choices[0].message
+    raw_content = message.content
+
+    # Check for empty/null content before attempting .strip()
+    if raw_content is None:
+        # Check if the model stored output under a reasoning attribute
+        if hasattr(message, "reasoning") and message.reasoning:
+            raw_content = message.reasoning
+        elif hasattr(message, "thinking") and message.thinking:
+            raw_content = message.thinking
+        else:
+            raise ValueError(f"LLM returned an empty (None) response. The endpoint may be overloaded.")
+
     print("[+] LLM response received. Parsing JSON report...", flush=True)
-    raw_content = response.choices[0].message.content.strip()
+    
+    raw_content = raw_content.strip()
 
     if raw_content.startswith("```json"):
         raw_content = raw_content.replace("```json", "", 1)
