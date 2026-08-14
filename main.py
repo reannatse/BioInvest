@@ -463,7 +463,9 @@ def publish_to_wordpress(title: str, html_content: str) -> Dict:
         raise ValueError("Missing WP_OAUTH_TOKEN in environment variables.")
 
     # WordPress.com Public API endpoint
-    api_url = f"[https://public-api.wordpress.com/rest/v1.1/sites/](https://public-api.wordpress.com/rest/v1.1/sites/){WP_SITE_ID}/posts/new"
+    api_url = (
+    "https://public-api.wordpress.com/rest/v1.1/sites/bioinvestech.wordpress.com/posts/new"
+)
 
     headers = {
         "Authorization": f"Bearer {WP_OAUTH_TOKEN}",
