@@ -1,16 +1,52 @@
-name: Biotech Catalyst Agent Specific Run
+name: Biotech Catalyst Agent Run
 
 on:
+  schedule:
+    # Runs daily at 08:00 UTC (defaults to All General Categories)
+    - cron: '0 8 * * *'
   workflow_dispatch:
     inputs:
       category_name:
-        description: 'Category Name (e.g., Oncology, Neuroscience, Immunology, Anti-diabetics, AI Drug Discovery(AIDD))'
-        required: false
-        default: 'Oncology'
+        description: 'Select Primary Category:'
+        required: true
+        default: 'All General Categories'
+        type: choice
+        options:
+          - 'All General Categories'
+          - 'Oncology'
+          - 'Neuroscience'
+          - 'Immunology'
+          - 'Anti-diabetics'
+          - 'AI Drug Discovery (AIDD)'
+
       subcategory_name:
-        description: 'Subcategory Name (e.g., RAS Pathway Targeted Small Molecule Inhibitors)'
-        required: false
-        default: 'RAS Pathway Targeted Small Molecule Inhibitors'
+        description: 'Select Subcategory (Overrides Primary Category if set to anything other than None):'
+        required: true
+        default: 'None (Use Primary Category selection)'
+        type: choice
+        options:
+          - 'None (Use Primary Category selection)'
+          # Oncology Subcategories
+          - 'General Oncology'
+          - 'RAS Pathway Targeted Small Molecule Inhibitors'
+          - 'KRAS G12C Inhibitors'
+          - 'KRAS G12D / Multi-KRAS Inhibitors'
+          - 'Pan-RAS & Direct RAS Inhibitors'
+          - 'EGFR & HER2 Directed Small Molecule Inhibitors'
+          - '3rd Gen EGFR TKI (Osimertinib-Resistant Mutations)'
+          - '4th Gen EGFR TKI (C797S Mutation Targeted)'
+          - 'HER2 Exon 20 Insertion & Exon 19/21 Targeted TKIs'
+          - 'Exon 20 Insertion / Rare Mutation EGFR TKIs'
+          # Neuroscience Subcategories
+          - 'General Neuroscience'
+          - 'Neurodegenerative Diseases (Alzheimers / Parkinsons)'
+          - 'Neuroimmunology & Multiple Sclerosis'
+          # Immunology Subcategories
+          - 'General Immunology'
+          - 'Autoimmune & Inflammatory Diseases'
+          # Anti-diabetics Subcategories
+          - 'General Anti-diabetics'
+          - 'GLP-1 / GIP / Glucagon Receptor Agonists'
 
 jobs:
   run-agent:
@@ -24,7 +60,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          cache: 'pip' # caching pip dependencies for faster runs
+          cache: 'pip'
 
       - name: Install dependencies
         run: |
@@ -37,7 +73,7 @@ jobs:
           WP_SITE_ID: ${{ secrets.WP_SITE_ID }}
           WP_OAUTH_TOKEN: ${{ secrets.WP_OAUTH_TOKEN }}
           PUBLISH_STATUS: "publish"
-          CATEGORY_NAME: ${{ github.event.inputs.category_name || 'Oncology' }}
-          SUBCATEGORY_NAME: ${{ github.event.inputs.subcategory_name || 'RAS Pathway Targeted Small Molecule Inhibitors' }}
+          CATEGORY_NAME: ${{ github.event.inputs.category_name || 'All General Categories' }}
+          SUBCATEGORY_NAME: ${{ github.event.inputs.subcategory_name || 'None (Use Primary Category selection)' }}
         run: |
           python main1.py
