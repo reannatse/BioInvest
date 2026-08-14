@@ -1,28 +1,27 @@
 #!/usr/bin/env python
 # coding: utf-8
 
+import io
 import json
 import os
-import time
 import urllib.parse
 from datetime import datetime
 from typing import Dict, List
 import feedparser
 import requests
 from dotenv import load_dotenv
-from openai import OpenAI, APIError
-from tqdm import tqdm
+from openai import OpenAI
 
-# Load environment variables
+# Load environment variables from .env file if available
 load_dotenv()
 
 # ==========================================
 # CONFIGURATION & INITIALIZATION
 # ==========================================
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-MODEL_NAME = "nvidia/nemotron-3-ultra-550b-a55b:free"
+MODEL_NAME = "google/gemini-2.0-flash-lite-preview-02-05:free"
 
-WP_URL = os.getenv("WP_URL")  # e.g., "https://yourdomain.com"
+WP_URL = os.getenv("WP_URL")
 WP_USERNAME = os.getenv("WP_USERNAME")
 WP_APP_PASSWORD = os.getenv("WP_APP_PASSWORD")
 PUBLISH_STATUS = os.getenv("PUBLISH_STATUS", "publish")  # 'publish' or 'draft'
@@ -47,56 +46,185 @@ ONCOLOGY_SUBCATEGORIES = {
         "FDA breakthrough designation cancer drug",
         "PDUFA oncology approval catalyst"
     ],
+    "Antibody-Drug Conjugates (ADC)": [
+        "ADC clinical trial readout",
+        "antibody drug conjugate pipeline",
+        "ASCO ADC oncology trial results",
+        "FDA fast track ADC cancer drug"
+    ],
+    "Bispecific and Multispecific Antibodies": [
+        "bispecific antibody clinical trial",
+        "multispecific antibody cancer readout",
+        "bispecific T-cell engager pipeline",
+        "FDA breakthrough bispecific antibody"
+    ],
     "RAS Pathway Targeted Small Molecule Inhibitors": [
         "KRAS inhibitor clinical trial",
         "pan-RAS inhibitor trial readout",
         "KRAS G12C cancer pipeline",
         "FDA breakthrough KRAS inhibitor"
+    ],
+    "Emerging Cancer Vaccines": [
+        "cancer vaccine clinical trial",
+        "mRNA cancer vaccine pipeline",
+        "therapeutic cancer vaccine readout",
+        "FDA fast track cancer vaccine"
+    ],
+    "CAR-T and Cell Therapy": [
+        "CAR-T cell therapy clinical trial",
+        "allogeneic cell therapy readout",
+        "ASCO ASH cell therapy data",
+        "FDA fast track CAR-T"
+    ]
+}
+
+NEUROSCIENCE_SUBCATEGORIES = {
+    "General Neuroscience": [
+        "neuroscience CNS clinical trial results",
+        "Phase 3 readout neuroscience biotech",
+        "FDA breakthrough designation CNS drug",
+        "PDUFA neuroscience approval catalyst"
+    ],
+    "Schizophrenia and Major Depressive Disorder (MDD)": [
+        "schizophrenia clinical trial readout",
+        "depression drug pipeline catalyst",
+        "muscarinic agonist schizophrenia trial",
+        "FDA fast track psychiatric drug"
+    ],
+    "Alzheimer's and Neurodegenerative Disease": [
+        "Alzheimer clinical trial readout",
+        "Parkinson ALS pipeline catalyst",
+        "CTAD Alzheimer data readout",
+        "FDA approval neurodegenerative disease"
+    ],
+    "Rare Diseases and Movement Disorders": [
+        "movement disorder trial readout",
+        "Huntington SMA ataxia trial results",
+        "orphan drug status neurological disease",
+        "FDA fast track movement disorder drug"
+    ]
+}
+
+IMMUNOLOGY_SUBCATEGORIES = {
+    "General Immunology": [
+        "immunology clinical trial results",
+        "autoimmune Phase 3 readout",
+        "FDA breakthrough immunology drug",
+        "autoimmune drug approval catalyst"
+    ],
+    "Biologics (Monoclonal Antibodies)": [
+        "monoclonal antibody autoimmune trial",
+        "biologic autoimmune IL-23 IL-17",
+        "monoclonal antibody immunology results",
+        "biologic autoimmune clinical trial"
+    ],
+    "Calcineurin Inhibitors": [
+        "calcineurin inhibitor clinical trial",
+        "tacrolimus cyclosporine trial readout",
+        "calcineurin autoimmune drug",
+        "calcineurin inhibitor pipeline"
+    ],
+    "Antimetabolites and Cytotoxic Agents": [
+        "antimetabolite immunosuppressive trial",
+        "methotrexate mycophenolate pipeline",
+        "cytotoxic autoimmune disease trial",
+        "immunosuppressive drug trial results"
+    ],
+    "Janus Kinase (JAK) Inhibitors": [
+        "JAK inhibitor clinical trial readout",
+        "TYK2 inhibitor autoimmune trial",
+        "JAK inhibitor trial results",
+        "TYK2 JAK inhibitor biotech news"
+    ]
+}
+
+ANTI_DIABETICS_SUBCATEGORIES = {
+    "General Anti-diabetics": [
+        "diabetes clinical trial results",
+        "Phase 3 readout diabetes drug",
+        "FDA approval catalyst diabetes",
+        "anti-diabetic pipeline trial results"
+    ],
+    "GLP-1 and Injectable Therapies": [
+        "GLP-1 GIP clinical trial obesity",
+        "GLP-1 diabetes trial readout",
+        "obesity metabolic drug readout",
+        "ADA conference GLP-1 results"
+    ],
+    "Oral Therapies": [
+        "oral GLP-1 clinical trial readout",
+        "SGLT2 DPP-4 inhibitor trial",
+        "oral diabetes drug pipeline catalyst",
+        "FDA fast track oral anti-diabetic"
     ]
 }
 
 PRIMARY_CATEGORIES = {
-    "Oncology": ONCOLOGY_SUBCATEGORIES
+    "Oncology": ONCOLOGY_SUBCATEGORIES,
+    "Neuroscience": NEUROSCIENCE_SUBCATEGORIES,
+    "Immunology": IMMUNOLOGY_SUBCATEGORIES,
+    "Anti-diabetics": ANTI_DIABETICS_SUBCATEGORIES,
+    "AI Drug Discovery(AIDD)": [
+        "AI drug discovery clinical trial",
+        "AIDD candidate pipeline progress",
+        "computational biology drug candidate trial",
+        "AIDD candidate pipeline FDA status"
+    ]
 }
 
-SUBCATEGORY_PARENTS = ["Oncology"]
+SUBCATEGORY_PARENTS = ["Oncology", "Neuroscience", "Immunology", "Anti-diabetics"]
 
 # ==========================================
 # 1. RSS NEWS INGESTION ENGINE
 # ==========================================
 
 def fetch_google_news_rss(query: str, max_results: int = 5) -> List[Dict]:
+    """Fetches news items from Google News RSS with a strict timeout and User-Agent."""
     encoded_query = urllib.parse.quote(query)
     rss_url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
 
-    feed = feedparser.parse(rss_url)
-    articles = []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
 
-    for entry in feed.entries[:max_results]:
-        source_title = getattr(entry, "source", {}).get("title", "Google News") if hasattr(entry, "source") else "Google News"
-        articles.append({
-            "title": entry.title,
-            "link": entry.link,
-            "published": getattr(entry, "published", "N/A"),
-            "summary": getattr(entry, "summary", ""),
-            "source": source_title
-        })
+    articles = []
+    try:
+        response = requests.get(rss_url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            feed = feedparser.parse(io.BytesIO(response.content))
+            for entry in feed.entries[:max_results]:
+                source_title = getattr(entry, "source", {}).get("title", "Google News") if hasattr(entry, "source") else "Google News"
+                articles.append({
+                    "title": entry.title,
+                    "link": entry.link,
+                    "published": getattr(entry, "published", "N/A"),
+                    "summary": getattr(entry, "summary", ""),
+                    "source": source_title
+                })
+        else:
+            print(f"[!] Warning: Received HTTP status {response.status_code} for query '{query}'", flush=True)
+    except requests.exceptions.RequestException as e:
+        print(f"[!] Timeout or connection error fetching query '{query}': {e}", flush=True)
 
     return articles
 
 def gather_category_data(category_label: str, queries: List[str]) -> List[Dict]:
+    """Collects news data across queries with plain console logging."""
     aggregated_articles = []
     seen_titles = set()
 
-    print(f"\n[*] Starting RSS ingestion for: {category_label}")
-    for q in tqdm(queries, desc="Fetching News Feeds", unit="query"):
+    print(f"[*] Starting RSS ingestion for: {category_label}", flush=True)
+    total_queries = len(queries)
+    
+    for idx, q in enumerate(queries, 1):
+        print(f"    [{idx}/{total_queries}] Fetching query: '{q}'...", flush=True)
         articles = fetch_google_news_rss(q, max_results=5)
         for art in articles:
             if art["title"] not in seen_titles:
                 seen_titles.add(art["title"])
                 aggregated_articles.append(art)
 
-    print(f"[+] Ingestion complete. Total unique articles retrieved: {len(aggregated_articles)}")
+    print(f"[+] RSS Ingestion complete. Total unique articles retrieved: {len(aggregated_articles)}\n", flush=True)
     return aggregated_articles
 
 # ==========================================
@@ -106,69 +234,105 @@ def gather_category_data(category_label: str, queries: List[str]) -> List[Dict]:
 SYSTEM_PROMPT = """You are a Senior Biotechnology Equity Research Analyst and Biotech Catalyst Specialist.
 Your task is to analyze news, research summaries, and market signals to identify, score, and rank the TOP 5 drug candidates receiving the highest attention in a given category or subcategory.
 
-Always respond with valid JSON formatting.
+You must score each candidate (1 to 10 scale) using 6 strict dimensions:
+1. Market Size & Unmet Need
+2. Market Competition & Saturation (10 = low saturation/strong moat)
+3. Predicted Peak Sales & Revenue Potential
+4. Valuation & Stock Pricing Dynamics (10 = attractive risk-reward)
+5. Novelty, Moat & FDA Special Status (Breakthrough, Fast Track, Orphan)
+6. Catalysts, Readout Dates & Sentiment/Market Noise
+
+Strict Rules:
+1. Prioritize candidates driven by recent news within the last 1-3 months.
+2. Contextualize candidates by documenting any past trial failures, clinical holds, or safety concerns.
+3. For public companies, evaluate stock performance, Wall Street analyst consensus, price targets, and ratings (e.g., Strong Buy, Hold, Sell).
+4. Always respond with valid JSON formatting.
 """
 
 def analyze_catalysts_with_llm(category_label: str, news_data: List[Dict]) -> Dict:
-    formatted_news = "\n".join([
-        f"- Title: {item['title']}\n  Date: {item['published']}\n  Source: {item.get('source', 'Google News')}\n  Snippet: {item['summary']}\n"
-        for item in news_data
-    ]) if news_data else "No recent RSS news items retrieved."
+    if news_data:
+        formatted_news = "\n".join([
+            f"- Title: {item['title']}\n  Date: {item['published']}\n  Source: {item.get('source', 'Google News')}\n  Snippet: {item['summary']}\n"
+            for item in news_data
+        ])
+    else:
+        formatted_news = "No recent RSS news items retrieved. Rely on your domain knowledge of recent clinical trials and catalysts."
 
-    user_prompt = f"""
-Category / Subcategory to Analyze: {category_label}
-News: {formatted_news}
+    # Using standard multiline string to keep IDE syntax highlighting clean
+    prompt_template = """
+Category / Subcategory to Analyze: __CATEGORY__
 
-Return the TOP 5 DRUG CANDIDATES formatted strictly as valid JSON adhering to this schema:
-{{
-  "category": "{category_label}",
+Here is the compiled news, conference updates, published papers and market reports:
+__NEWS__
+
+Based on the news provided and your biopharma domain expertise:
+1. Identify the TOP 5 DRUG CANDIDATES currently driving attention or clinical catalysts specifically in __CATEGORY__.
+2. Extract clinical trial readouts, key timeline dates, and company tickers for each candidate.
+3. Score each drug across the 6 priority criteria (1-10 scale) and calculate `weighted_priority_score_total` (average of the 6 scores).
+4. SORT the list in DESCENDING order (Rank #1 = highest overall catalyst score).
+
+Analyze the data and return the TOP 5 DRUG CANDIDATES formatted strictly as valid JSON adhering to this schema:
+
+{
+  "category": "__CATEGORY__",
   "total_candidates_found": 5,
   "ranked_drugs": [
-    {{
+    {
       "rank": 1,
-      "drug_name": "Drug Name",
-      "company_ticker": "Company (TICKER)",
-      "mechanism_of_action": "MoA description",
-      "attention_driver": "Key reason for recent attention",
-      "historical_track_record_and_risks": "Historical context",
-      "stock_market_context": {{
-        "ticker": "TICKER",
-        "stock_price_range_est": "Range",
-        "analyst_rating": "Rating",
-        "target_price_est": "Target Price",
-        "stock_trend_expectation": "Trend"
-      }},
-      "clinical_trials": {{
-        "current_phase": "Phase",
-        "recent_readout_data": "Readout data",
-        "predicted_finish_date": "Finish date",
-        "pdufa_or_key_dates": "Key dates"
-      }},
-      "priority_scores": {{
+      "drug_name": "Drug Name / Code",
+      "company_ticker": "Company (TICKER) or Private",
+      "mechanism_of_action": "Brief MoA description",
+      "attention_driver": "Key reason for recent market attention. Specific catalyst/news event occurring in the last 1-3 months.",
+      "historical_track_record_and_risks": "Past trial failures, CRLs, clinical holds, or adverse safety history to keep in mind",
+      "stock_market_context": {
+        "ticker": "NASDAQ: TICKER or N/A",
+        "stock_price_range_est": "Current trading price / 52-week context",
+        "analyst_rating": "Strong Buy / Buy / Hold / Sell",
+        "target_price_est": "Consensus 12-month Price Target (e.g., $45.00)",
+        "stock_trend_expectation": "Generally Upward / Downward / Volatile near catalyst"
+      },
+      "clinical_trials": {
+        "current_phase": "Phase 2 / Phase 3 / PDUFA",
+        "recent_readout_data": "Key data readout summary",
+        "predicted_finish_date": "Est. completion window",
+        "pdufa_or_key_dates": "Specific target dates or quarter"
+      },
+      "priority_scores": {
         "market_size_unmet_need": 9,
         "competition_saturation_inverse": 8,
         "predicted_peak_sales_potential": 9,
         "valuation_attractiveness": 7,
         "novelty_and_fda_status": 9,
         "sentiment_and_market_noise": 8
-      }},
-      "investment_analysis":{{
-        "opportunities": ["Opportunity 1"],
-        "risks": ["Risk 1"]
-      }},
-      "score_justification": {{
-        "fda_status": "Status",
-        "peak_sales_estimate": "Estimate",
-        "valuation_commentary": "Commentary"
-      }},
+      },
+      "investment_analysis":{
+        "opportunities": [
+          "First-in-class / best-in-class potential in large indication",
+          "High M&A / licensing buyout target for large pharma",
+          "Favorable FDA designation accelerates market entry"
+        ],
+        "risks": [
+          "Off-target toxicity or adverse safety profile in Phase 3",
+          "Commercial overcrowding and pricing pressure from rivals",
+          "Risk of trial failure or delayed primary endpoint data"
+        ]
+      },
+      "score_justification": {
+        "fda_status": "Fast Track / Breakthrough / None",
+        "peak_sales_estimate": "$B estimate",
+        "valuation_commentary": "Brief valuation risk assessment"
+      },
       "weighted_priority_score_total": 8.3,
-      "investment_thesis": "Thesis sentence"
-    }}
+      "investment_thesis": "One-sentence bottom-line investment/catalyst outlook"
+    }
   ]
-}}
+}
 """
 
-    print(f"\n[*] Querying LLM ({MODEL_NAME})...")
+    user_prompt = prompt_template.replace("__CATEGORY__", category_label).replace("__NEWS__", formatted_news)
+
+    print(f"[*] Querying LLM ({MODEL_NAME})...", flush=True)
+
     response = client.chat.completions.create(
         model=MODEL_NAME,
         messages=[
@@ -179,33 +343,103 @@ Return the TOP 5 DRUG CANDIDATES formatted strictly as valid JSON adhering to th
         response_format={"type": "json_object"}
     )
 
-    cleaned_content = response.choices[0].message.content.strip()
-    return json.loads(cleaned_content)
+    print("[+] LLM response received. Parsing JSON report...", flush=True)
+    raw_content = response.choices[0].message.content.strip()
+
+    if raw_content.startswith("```json"):
+        raw_content = raw_content.replace("```json", "", 1)
+    if raw_content.startswith("```"):
+        raw_content = raw_content.replace("```", "", 1)
+    if raw_content.endswith("```"):
+        raw_content = raw_content[:-3]
+
+    return json.loads(raw_content.strip())
 
 # ==========================================
 # 3. HTML BUILDER & WORDPRESS PUBLISHER
 # ==========================================
 
 def build_blog_html(analysis: Dict, news_data: List[Dict]) -> str:
+    """Builds HTML string for WordPress post."""
     ranked = analysis.get("ranked_drugs", [])[:5]
     cat = analysis.get("category", "Unknown Category")
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
-    html = [f"<h2>Biotech Catalyst Intelligence Report</h2><p><b>Category:</b> {cat}<br><b>Generated:</b> {now}</p>"]
-    html.append("<h3>Top 5 Leaderboard</h3><ol>")
+    html = []
+    html.append(f"<h2>Biotech Catalyst Intelligence Report</h2>")
+    html.append(f"<p><b>Category:</b> {cat}<br><b>Generated:</b> {now}</p>")
+
+    html.append("<h3>Top 5 Leaderboard</h3>")
+    html.append("<ol>")
     for d in ranked:
-        html.append(f"<li><b>{d.get('drug_name','N/A')}</b> ({d.get('company_ticker','N/A')}) - Score: {d.get('weighted_priority_score_total','N/A')}/10</li>")
+        html.append(
+            f"<li><b>{d.get('drug_name','N/A')}</b> ({d.get('company_ticker','N/A')}) "
+            f"- Score: {d.get('weighted_priority_score_total','N/A')}/10, "
+            f"Phase: {d.get('clinical_trials',{}).get('current_phase','N/A')}</li>"
+        )
     html.append("</ol>")
 
     for d in ranked:
+        trials = d.get("clinical_trials", {})
+        stock = d.get("stock_market_context", {})
+        scores = d.get("priority_scores", {})
+        just = d.get("score_justification", {})
+        inv = d.get("investment_analysis", {})
+
         html.append(f"<hr><h3>Rank #{d.get('rank','-')}: {d.get('drug_name','N/A')}</h3>")
-        html.append(f"<p><b>Company:</b> {d.get('company_ticker','N/A')}<br><b>MoA:</b> {d.get('mechanism_of_action','N/A')}</p>")
+        html.append(f"<p><b>Company:</b> {d.get('company_ticker','N/A')}<br>")
+        html.append(f"<b>MoA:</b> {d.get('mechanism_of_action','N/A')}<br>")
+        html.append(f"<b>Attention Driver:</b> {d.get('attention_driver','N/A')}</p>")
+
+        html.append(f"<p><b>Historical Risks:</b> {d.get('historical_track_record_and_risks','N/A')}</p>")
+
+        html.append("<p><b>Stock Context</b><br>")
+        html.append(f"Ticker: {stock.get('ticker','N/A')}<br>")
+        html.append(f"Price Range: {stock.get('stock_price_range_est','N/A')}<br>")
+        html.append(f"Analyst Rating: {stock.get('analyst_rating','N/A')}<br>")
+        html.append(f"Target Price: {stock.get('target_price_est','N/A')}<br>")
+        html.append(f"Trend: {stock.get('stock_trend_expectation','N/A')}</p>")
+
+        html.append("<p><b>Clinical Timeline</b><br>")
+        html.append(f"Phase: {trials.get('current_phase','N/A')}<br>")
+        html.append(f"Readout: {trials.get('recent_readout_data','N/A')}<br>")
+        html.append(f"Finish: {trials.get('predicted_finish_date','N/A')}<br>")
+        html.append(f"Key Dates: {trials.get('pdufa_or_key_dates','N/A')}</p>")
+
+        html.append("<p><b>Scoring</b><br>")
+        html.append(f"Market Size: {scores.get('market_size_unmet_need','N/A')}, ")
+        html.append(f"Competition(Inverse): {scores.get('competition_saturation_inverse','N/A')}, ")
+        html.append(f"Peak Sales: {scores.get('predicted_peak_sales_potential','N/A')}, ")
+        html.append(f"Valuation: {scores.get('valuation_attractiveness','N/A')}, ")
+        html.append(f"Novelty/FDA: {scores.get('novelty_and_fda_status','N/A')}, ")
+        html.append(f"Sentiment: {scores.get('sentiment_and_market_noise','N/A')}</p>")
+
+        html.append("<p><b>Opportunities</b></p><ul>")
+        for o in inv.get("opportunities", []):
+            html.append(f"<li>{o}</li>")
+        html.append("</ul><p><b>Risks</b></p><ul>")
+        for r in inv.get("risks", []):
+            html.append(f"<li>{r}</li>")
+        html.append("</ul>")
+
+        html.append(f"<p><b>FDA Status:</b> {just.get('fda_status','N/A')}<br>")
+        html.append(f"<b>Peak Sales Estimate:</b> {just.get('peak_sales_estimate','N/A')}<br>")
+        html.append(f"<b>Valuation Commentary:</b> {just.get('valuation_commentary','N/A')}</p>")
+
         html.append(f"<p><b>Investment Thesis:</b> {d.get('investment_thesis','N/A')}</p>")
 
-    html.append("<hr><h3>Resources</h3><ul>")
-    for item in news_data:
-        html.append(f'<li><a href="{item.get("link","#")}" target="_blank">{item.get("title","Link")}</a></li>')
-    html.append("</ul>")
+    # Resources section
+    html.append("<hr><h3>Resources</h3>")
+    if news_data:
+        html.append("<ul>")
+        for item in news_data:
+            title = item.get("title", "Untitled")
+            link = item.get("link", "#")
+            pub = item.get("published", "N/A")
+            html.append(f'<li><a href="{link}" target="_blank">{title}</a> <i>({pub})</i></li>')
+        html.append("</ul>")
+    else:
+        html.append("<p>No source links retrieved from RSS for this run.</p>")
 
     return "\n".join(html)
 
@@ -214,18 +448,15 @@ def publish_to_wordpress(title: str, html_content: str) -> Dict:
     if not WP_URL or not WP_USERNAME or not WP_APP_PASSWORD:
         raise ValueError("Missing WP_URL, WP_USERNAME, or WP_APP_PASSWORD in environment variables.")
 
-    # Format the REST API post endpoint URL
     clean_url = WP_URL.rstrip('/')
     api_url = f"{clean_url}/wp-json/wp/v2/posts"
 
-    # Define post body and status
     post_data = {
         "title": title,
         "content": html_content,
         "status": PUBLISH_STATUS.lower()  # 'publish' or 'draft'
     }
 
-    # Send POST request using HTTP Basic Auth
     response = requests.post(
         api_url,
         auth=(WP_USERNAME, WP_APP_PASSWORD),
@@ -243,21 +474,43 @@ def publish_to_wordpress(title: str, html_content: str) -> Dict:
 # ==========================================
 
 def run_agent():
+    print("="*80, flush=True)
+    print(" BIOTECH CATALYST INTELLIGENCE AGENT (WORDPRESS)", flush=True)
+    print("="*80, flush=True)
+
     selected_category_name = os.getenv("CATEGORY_NAME", "Oncology")
     selected_subcat_name = os.getenv("SUBCATEGORY_NAME", "RAS Pathway Targeted Small Molecule Inhibitors")
 
-    subcat_dict = PRIMARY_CATEGORIES[selected_category_name]
-    queries_to_run = subcat_dict[selected_subcat_name]
-    selected_label = f"{selected_category_name} - {selected_subcat_name}"
+    if selected_category_name not in PRIMARY_CATEGORIES:
+        raise ValueError(f"Invalid CATEGORY_NAME: {selected_category_name}")
 
+    if selected_category_name in SUBCATEGORY_PARENTS:
+        subcat_dict = PRIMARY_CATEGORIES[selected_category_name]
+        if not selected_subcat_name:
+            selected_subcat_name = list(subcat_dict.keys())[0]
+        if selected_subcat_name not in subcat_dict:
+            raise ValueError(f"Invalid SUBCATEGORY_NAME for {selected_category_name}: {selected_subcat_name}")
+        selected_label = f"{selected_category_name} - {selected_subcat_name}"
+        queries_to_run = subcat_dict[selected_subcat_name]
+    else:
+        selected_label = selected_category_name
+        queries_to_run = PRIMARY_CATEGORIES[selected_category_name]
+
+    # Execute Pipeline
     news_items = gather_category_data(selected_label, queries_to_run)
-    report = analyze_catalysts_with_llm(selected_label, news_items)
 
-    post_title = f"Biotech Catalyst Report: {selected_label} ({datetime.utcnow().strftime('%Y-%m-%d')})"
-    post_html = build_blog_html(report, news_items)
-    
-    published = publish_to_wordpress(post_title, post_html)
-    print(f"[+] WordPress Post Published Successfully! Post URL: {published.get('link')}")
+    try:
+        report = analyze_catalysts_with_llm(selected_label, news_items)
+
+        post_title = f"Biotech Catalyst Report: {selected_label} ({datetime.utcnow().strftime('%Y-%m-%d')})"
+        post_html = build_blog_html(report, news_items)
+
+        print("[*] Publishing report to WordPress...", flush=True)
+        published = publish_to_wordpress(post_title, post_html)
+        print(f"[+] Post published successfully! URL: {published.get('link')}", flush=True)
+
+    except Exception as e:
+        print(f"\n[!] Error during execution or publishing: {e}", flush=True)
 
 if __name__ == "__main__":
     run_agent()
