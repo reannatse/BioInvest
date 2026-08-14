@@ -1,9 +1,6 @@
-name: Biotech Catalyst Agent Daily Run
+name: Biotech Catalyst Agent Specific Run
 
 on:
-  schedule:
-    # Runs daily at 08:00 UTC
-    - cron: '0 8 * * *'
   workflow_dispatch:
     inputs:
       category_name:
