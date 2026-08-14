@@ -43,4 +43,4 @@ jobs:
           CATEGORY_NAME: ${{ github.event.inputs.category_name || 'Oncology' }}
           SUBCATEGORY_NAME: ${{ github.event.inputs.subcategory_name || 'RAS Pathway Targeted Small Molecule Inhibitors' }}
         run: |
-          python agent.py
+          python main.py
