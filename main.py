@@ -21,10 +21,10 @@ load_dotenv()
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 MODEL_NAME = "nvidia/nemotron-3-ultra-550b-a55b:free"
 
-WP_URL = os.getenv("WP_URL")
-WP_USERNAME = os.getenv("WP_USERNAME")
-WP_APP_PASSWORD = os.getenv("WP_APP_PASSWORD")
-PUBLISH_STATUS = os.getenv("PUBLISH_STATUS", "publish")  # 'publish' or 'draft'
+# WordPress.com Configuration
+WP_SITE_ID = os.getenv("WP_SITE_ID", "bioinvestech.wordpress.com")
+WP_OAUTH_TOKEN = os.getenv("WP_OAUTH_TOKEN")
+PUBLISH_STATUS = os.getenv("PUBLISH_STATUS", "publish")  # Default set to 'publish' for automatic live posts
 
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
@@ -258,7 +258,6 @@ def analyze_catalysts_with_llm(category_label: str, news_data: List[Dict]) -> Di
     else:
         formatted_news = "No recent RSS news items retrieved. Rely on your domain knowledge of recent clinical trials and catalysts."
 
-    # Using standard multiline string to keep IDE syntax highlighting clean
     prompt_template = """
 Category / Subcategory to Analyze: __CATEGORY__
 
@@ -343,24 +342,19 @@ Analyze the data and return the TOP 5 DRUG CANDIDATES formatted strictly as vali
         response_format={"type": "json_object"}
     )
 
-    # ----------------------------------------------------
-    # FIX: Safely retrieve content to avoid NoneType errors
-    # ----------------------------------------------------
     if not response.choices or len(response.choices) == 0:
         raise ValueError("API returned an empty response with no choices.")
 
     message = response.choices[0].message
     raw_content = message.content
 
-    # Check for empty/null content before attempting .strip()
     if raw_content is None:
-        # Check if the model stored output under a reasoning attribute
         if hasattr(message, "reasoning") and message.reasoning:
             raw_content = message.reasoning
         elif hasattr(message, "thinking") and message.thinking:
             raw_content = message.thinking
         else:
-            raise ValueError(f"LLM returned an empty (None) response. The endpoint may be overloaded.")
+            raise ValueError("LLM returned an empty (None) response. The endpoint may be overloaded.")
 
     print("[+] LLM response received. Parsing JSON report...", flush=True)
     
@@ -386,7 +380,7 @@ def build_blog_html(analysis: Dict, news_data: List[Dict]) -> str:
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
     html = []
-    html.append(f"<h2>Biotech Catalyst Intelligence Report</h2>")
+    html.append("<h2>Biotech Catalyst Intelligence Report</h2>")
     html.append(f"<p><b>Category:</b> {cat}<br><b>Generated:</b> {now}</p>")
 
     html.append("<h3>Top 5 Leaderboard</h3>")
@@ -464,28 +458,33 @@ def build_blog_html(analysis: Dict, news_data: List[Dict]) -> str:
     return "\n".join(html)
 
 def publish_to_wordpress(title: str, html_content: str) -> Dict:
-    """Publishes a new post directly to WordPress via standard REST API."""
-    if not WP_URL or not WP_USERNAME or not WP_APP_PASSWORD:
-        raise ValueError("Missing WP_URL, WP_USERNAME, or WP_APP_PASSWORD in environment variables.")
+    """Publishes a post directly to WordPress.com via the Public REST API v1.1."""
+    if not WP_OAUTH_TOKEN:
+        raise ValueError("Missing WP_OAUTH_TOKEN in environment variables.")
 
-    clean_url = WP_URL.rstrip('/')
-    api_url = f"{clean_url}/wp-json/wp/v2/posts"
+    # WordPress.com Public API endpoint
+    api_url = f"[https://public-api.wordpress.com/rest/v1.1/sites/](https://public-api.wordpress.com/rest/v1.1/sites/){WP_SITE_ID}/posts/new"
+
+    headers = {
+        "Authorization": f"Bearer {WP_OAUTH_TOKEN}",
+        "Content-Type": "application/json"
+    }
 
     post_data = {
         "title": title,
         "content": html_content,
-        "status": PUBLISH_STATUS.lower()  # 'publish' or 'draft'
+        "status": PUBLISH_STATUS.lower()  # 'publish' creates a live post immediately
     }
 
     response = requests.post(
         api_url,
-        auth=(WP_USERNAME, WP_APP_PASSWORD),
+        headers=headers,
         json=post_data,
         timeout=30
     )
 
     if response.status_code not in [200, 201]:
-        raise Exception(f"WordPress API Error ({response.status_code}): {response.text}")
+        raise Exception(f"WordPress.com API Error ({response.status_code}): {response.text}")
 
     return response.json()
 
@@ -495,7 +494,7 @@ def publish_to_wordpress(title: str, html_content: str) -> Dict:
 
 def run_agent():
     print("="*80, flush=True)
-    print(" BIOTECH CATALYST INTELLIGENCE AGENT (WORDPRESS)", flush=True)
+    print(" BIOTECH CATALYST INTELLIGENCE AGENT (WORDPRESS.COM)", flush=True)
     print("="*80, flush=True)
 
     selected_category_name = os.getenv("CATEGORY_NAME", "Oncology")
@@ -525,9 +524,9 @@ def run_agent():
         post_title = f"Biotech Catalyst Report: {selected_label} ({datetime.utcnow().strftime('%Y-%m-%d')})"
         post_html = build_blog_html(report, news_items)
 
-        print("[*] Publishing report to WordPress...", flush=True)
+        print("[*] Publishing report to WordPress.com...", flush=True)
         published = publish_to_wordpress(post_title, post_html)
-        print(f"[+] Post published successfully! URL: {published.get('link')}", flush=True)
+        print(f"[+] Post published LIVE successfully! URL: {published.get('URL')}", flush=True)
 
     except Exception as e:
         print(f"\n[!] Error during execution or publishing: {e}", flush=True)
