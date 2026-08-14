@@ -1,36 +1,46 @@
-name: Daily Biotech Report to WordPress
+name: Biotech Catalyst Agent Daily Run
 
 on:
   schedule:
-    - cron: "0 13 * * *"   # Runs daily at 13:00 UTC
-  workflow_dispatch:        # Manual execution trigger
+    # Runs daily at 08:00 UTC
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+    inputs:
+      category_name:
+        description: 'Category Name (e.g., Oncology, Neuroscience, Immunology, Anti-diabetics, AI Drug Discovery(AIDD))'
+        required: false
+        default: 'Oncology'
+      subcategory_name:
+        description: 'Subcategory Name (e.g., RAS Pathway Targeted Small Molecule Inhibitors)'
+        required: false
+        default: 'RAS Pathway Targeted Small Molecule Inhibitors'
 
 jobs:
-  run-report:
+  run-agent:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.10'
+          cache: 'pip' # caching pip dependencies for faster runs
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install feedparser openai tqdm requests python-dotenv
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Run report publisher
+      - name: Run Biotech Catalyst Agent
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          WP_URL: ${{ secrets.WP_URL }}
-          WP_USERNAME: ${{ secrets.WP_USERNAME }}
-          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-          CATEGORY_NAME: "Oncology"
-          SUBCATEGORY_NAME: "RAS Pathway Targeted Small Molecule Inhibitors"
-          PUBLISH_STATUS: "publish" # Change to 'draft' if you prefer to manually review posts
+          WP_SITE_ID: ${{ secrets.WP_SITE_ID }}
+          WP_OAUTH_TOKEN: ${{ secrets.WP_OAUTH_TOKEN }}
+          PUBLISH_STATUS: "publish"
+          CATEGORY_NAME: ${{ github.event.inputs.category_name || 'Oncology' }}
+          SUBCATEGORY_NAME: ${{ github.event.inputs.subcategory_name || 'RAS Pathway Targeted Small Molecule Inhibitors' }}
         run: |
-          python main.py
+          python agent.py
