@@ -21,7 +21,7 @@ load_dotenv()
 # CONFIGURATION & INITIALIZATION
 # ==========================================
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-MODEL_NAME = "nvidia/nemotron-3-ultra-550b-a55b:free"
+MODEL_NAME = "nvidia/nemotron-3-super-120b-a12b:free"
 
 # WordPress.com Configuration
 WP_SITE_ID = os.getenv("WP_SITE_ID", "bioinvestech.wordpress.com")
