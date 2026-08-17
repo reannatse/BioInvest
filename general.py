@@ -358,17 +358,20 @@ Analyze the data and return the TOP 5 DRUG CANDIDATES formatted strictly as vali
 
     print("[+] LLM response received. Parsing JSON report...", flush=True)
     
-    raw_content = raw_content.strip()
+# 1. Regex search to extract outer-most JSON object {...}
+    json_match = re.search(r"\{.*\}", raw_content, re.DOTALL)
+    if json_match:
+        json_str = json_match.group(0)
+    else:
+        json_str = raw_content.strip()
 
-    if raw_content.startswith("```json"):
-        raw_content = raw_content.replace("```json", "", 1)
-    if raw_content.startswith("```"):
-        raw_content = raw_content.replace("```", "", 1)
-    if raw_content.endswith("```"):
-        raw_content = raw_content[:-3]
-
-    return json.loads(raw_content.strip())
-
+    # 2. Try parsing with fallback debugging logs
+    try:
+        return json.loads(json_str)
+    except json.JSONDecodeError as err:
+        print(f"[!] JSON parsing error: {err}")
+        print(f"[!] Raw output received:\n{raw_content[:500]}...\n")
+        raise
 # ==========================================
 # 3. HTML BUILDER & WORDPRESS PUBLISHER
 # ==========================================
